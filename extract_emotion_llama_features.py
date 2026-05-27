@@ -669,10 +669,10 @@ def main(
         return
 
     # ====================== 准备输出目录 ======================
-    # 数据集名称（从路径提取），与 Qwen 版逻辑完全一致
+    # 目录结构：{output_dir}/{dataset_name}/
+    # 示例：.../EmotionLlamaEncoder/CA-MER/sample_001_fps1_features.pt
     dataset_name = os.path.basename(data_cfg["dataset_path"].rstrip("/\\"))
-    output_dir = os.path.join(saving_cfg["output_dir"], dataset_name)
-    feature_output_dir = os.path.join(output_dir, "single_files")
+    feature_output_dir = os.path.join(saving_cfg["output_dir"], dataset_name)
     os.makedirs(feature_output_dir, exist_ok=True)
 
     logger.info(f"特征输出目录: {feature_output_dir}")

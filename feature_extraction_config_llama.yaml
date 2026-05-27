@@ -93,8 +93,8 @@ feature_saving:
   mode: "single"
 
   # 特征输出根目录。
-  # 实际输出路径：{output_dir}/{dataset_name}/single_files/{video_id}_fps{fps}_features.pt
-  # 示例：/root/autodl-tmp/features/EmotionLlamaEncoder/CA-MER/single_files/sample_00000001_fps1_features.pt
+  # 实际输出路径：{output_dir}/{dataset_name}/{video_id}_fps{fps}_features.pt
+  # 示例：/root/autodl-tmp/features/EmotionLlamaEncoder/CA-MER/sample_00000001_fps1_features.pt
   output_dir: "/root/autodl-tmp/features/EmotionLlamaEncoder"
 
 # ---------------------------------------------------------------------------
