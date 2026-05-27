@@ -69,54 +69,105 @@ except ImportError:
     OutOfMemoryError = torch.cuda.OutOfMemoryError
 
 # ============================================================================
-# 路径配置（确保可以导入 minigpt4 和 feature_utils）
+# 路径配置：直接加载所需模块，彻底绕过 minigpt4 包的完整导入链
+# ============================================================================
+#
+# 根本问题：minigpt4/__init__.py 执行 `from minigpt4.models import *`，
+# 会把整个训练框架（soundfile、peft 旧版 API、omegaconf 等重型依赖）全部
+# 拉进来；而特征提取只需要 EVA-CLIP 视觉编码器（eva_vit.py）。
+# 每次修复一个依赖，下一个新依赖又会出现，这是一场"打地鼠"游戏。
+#
+# 一劳永逸的解决方案（无需修改仓库源文件）：
+#   1. 向 sys.modules 注入空占位 package，阻止所有 __init__.py 自动执行
+#   2. 用 importlib 直接从文件路径加载仅需的两个模块：
+#      ① minigpt4/common/dist_utils.py  （eva_vit.py 的唯一 minigpt4 内部依赖）
+#      ② minigpt4/models/eva_vit.py     （提供 create_eva_vit_g 函数）
+#   3. LayerNorm 直接在本脚本中内联定义（5 行，零新依赖）
 # ============================================================================
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+import importlib.util
+import types
 
-# 导入 minigpt4 框架（Emotion-LLaMA-main 目录）
+_SCRIPT_DIR       = os.path.dirname(os.path.abspath(__file__))
 _EMOTION_LLAMA_DIR = os.path.join(_SCRIPT_DIR, "Emotion-LLaMA-main")
-if _EMOTION_LLAMA_DIR not in sys.path:
-    sys.path.insert(0, _EMOTION_LLAMA_DIR)
+_MINIGPT4_DIR     = os.path.join(_EMOTION_LLAMA_DIR, "minigpt4")
 
-# minigpt4/__init__.py 执行 `from minigpt4.datasets.builders import *`，
-# 但官方仓库未包含 datasets/ 目录（数据集代码需单独获取）。
-# 在此自动创建空占位符包，解除导入阻塞。本脚本不使用任何数据集功能。
-for _stub_dir in [
-    os.path.join(_EMOTION_LLAMA_DIR, "minigpt4", "datasets"),
-    os.path.join(_EMOTION_LLAMA_DIR, "minigpt4", "datasets", "builders"),
-]:
-    os.makedirs(_stub_dir, exist_ok=True)
-    _stub_init = os.path.join(_stub_dir, "__init__.py")
-    if not os.path.exists(_stub_init):
-        with open(_stub_init, "w") as _f:
-            _f.write("# Auto-generated stub: datasets package not needed for feature extraction\n")
 
-# ---------------------------------------------------------------------------
-# peft 版本兼容性修复
-# ---------------------------------------------------------------------------
-# peft >= 0.7.0 移除了 `prepare_model_for_int8_training`（已改名为
-# `prepare_model_for_kbit_training`）。minigpt4/models/base_model.py 在其
-# 模块级 import 语句中引用了该旧 API，但特征提取时并不实际调用。
-#
-# 解决思路：在任何 minigpt4 模块被导入之前，将缺失的属性注入到已加载的
-# `peft` 模块对象中。Python 的 `from peft import X` 本质上是 `peft.X`，
-# 因此预注入后 base_model.py 的 import 语句可以正常完成。
-try:
-    import peft as _peft_compat
-    if not hasattr(_peft_compat, "prepare_model_for_int8_training"):
-        if hasattr(_peft_compat, "prepare_model_for_kbit_training"):
-            # peft >= 0.4.0 的等价替换函数
-            _peft_compat.prepare_model_for_int8_training = (
-                _peft_compat.prepare_model_for_kbit_training
-            )
-        else:
-            # 终极回退：返回原模型（特征提取时从不调用此函数）
-            _peft_compat.prepare_model_for_int8_training = lambda model, **kwargs: model
-    del _peft_compat
-except ImportError:
-    # peft 未安装时跳过（后续 timm/torch 环境可能不需要 peft）
-    pass
+def _stub_package(dotted_name: str, fs_path: str = None) -> types.ModuleType:
+    """
+    向 sys.modules 注入空 package 占位，阻止其 __init__.py 被执行。
+    已存在则直接返回（setdefault 语义，幂等）。
+    """
+    if dotted_name not in sys.modules:
+        m = types.ModuleType(dotted_name)
+        m.__package__ = dotted_name
+        m.__spec__    = None
+        if fs_path:
+            m.__path__ = [fs_path]
+        sys.modules[dotted_name] = m
+    return sys.modules[dotted_name]
+
+
+def _load_module_from_file(
+    dotted_name: str, fs_path: str, package: str = None
+) -> types.ModuleType:
+    """
+    用 importlib 从文件路径直接加载模块，绕过 package __init__.py。
+    先注册到 sys.modules 再执行，防止文件内部的循环导入。
+    幂等：已加载则直接返回。
+    """
+    if dotted_name in sys.modules:
+        return sys.modules[dotted_name]
+    spec = importlib.util.spec_from_file_location(dotted_name, fs_path)
+    m = importlib.util.module_from_spec(spec)
+    if package:
+        m.__package__ = package
+    sys.modules[dotted_name] = m   # 先注册，再执行
+    spec.loader.exec_module(m)
+    return m
+
+
+# -- 步骤1：为所有 minigpt4 子包注入空占位，阻止任何一级 __init__.py 执行 ---
+_stub_package("minigpt4",                   _MINIGPT4_DIR)
+_stub_package("minigpt4.models",            os.path.join(_MINIGPT4_DIR, "models"))
+_stub_package("minigpt4.common",            os.path.join(_MINIGPT4_DIR, "common"))
+_stub_package("minigpt4.processors",        os.path.join(_MINIGPT4_DIR, "processors"))
+_stub_package("minigpt4.conversation",      os.path.join(_MINIGPT4_DIR, "conversation"))
+_stub_package("minigpt4.tasks",             os.path.join(_MINIGPT4_DIR, "tasks"))
+_stub_package("minigpt4.datasets",          os.path.join(_MINIGPT4_DIR, "datasets"))
+_stub_package("minigpt4.datasets.builders", os.path.join(_MINIGPT4_DIR, "datasets", "builders"))
+
+# -- 步骤2：直接加载 dist_utils（eva_vit.py 的唯一 minigpt4 内部依赖）--------
+_load_module_from_file(
+    "minigpt4.common.dist_utils",
+    os.path.join(_MINIGPT4_DIR, "common", "dist_utils.py"),
+    package="minigpt4.common",
+)
+
+# -- 步骤3：直接加载 eva_vit，获取 create_eva_vit_g --------------------------
+_eva_vit_mod      = _load_module_from_file(
+    "minigpt4.models.eva_vit",
+    os.path.join(_MINIGPT4_DIR, "models", "eva_vit.py"),
+    package="minigpt4.models",
+)
+_create_eva_vit_g = _eva_vit_mod.create_eva_vit_g
+
+
+# ============================================================================
+# fp16 兼容 LayerNorm（原始来源：base_model.LayerNorm，内联定义，零新依赖）
+# ============================================================================
+
+class _FP16LayerNorm(nn.LayerNorm):
+    """
+    fp16/bf16 安全的 LayerNorm。
+    强制在 float32 精度下执行 Layer Norm，输出再转回原始 dtype，
+    避免 fp16 计算时可能出现的数值溢出。
+    原始来源：Emotion-LLaMA-main/minigpt4/models/base_model.py - LayerNorm
+    """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_type = x.dtype
+        return super().forward(x.type(torch.float32)).type(orig_type)
+
 
 # 导入 feature_utils（Qwen 提取器工具函数，格式完全复用）
 _UTILS_DIR = os.path.join(_SCRIPT_DIR, "emotion_qwen_feature_extractor")
@@ -228,14 +279,10 @@ class EmotionLlamaEncoder(nn.Module):
         # 步骤1：加载 EVA-CLIP-G（通过 create_eva_vit_g，自动下载/缓存权重）
         # ----------------------------------------------------------------
         logger.info("步骤1: 加载 EVA-CLIP-G 视觉编码器...")
-        try:
-            from minigpt4.models.eva_vit import create_eva_vit_g
-            from minigpt4.models.base_model import LayerNorm
-        except ImportError as e:
-            raise ImportError(
-                f"无法导入 minigpt4 模块：{e}\n"
-                f"请确认 Emotion-LLaMA-main 目录存在于：{_EMOTION_LLAMA_DIR}"
-            )
+        # _create_eva_vit_g 和 _FP16LayerNorm 已在模块级通过 importlib 直接加载，
+        # 完全绕过 minigpt4/__init__.py 的完整导入链（soundfile / peft 等重型依赖）。
+        create_eva_vit_g = _create_eva_vit_g
+        LayerNorm        = _FP16LayerNorm
 
         # create_eva_vit_g 会自动从网络下载 eva_vit_g.pth 并缓存
         # precision="fp16" 对应官方训练时的 vit_precision="fp16"
