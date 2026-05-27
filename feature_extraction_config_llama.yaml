@@ -1,0 +1,124 @@
+# ===========================================================================
+# Emotion-LLaMA 视觉特征提取配置文件
+# 文件名：feature_extraction_config_llama.yaml
+# 功能：定义 Emotion-LLaMA 视觉 Encoder 特征提取的所有可配置参数
+#
+# 与 Qwen 版（emotion_qwen_feature_extractor/feature_extraction_config.yaml）的对应关系：
+#   Qwen model.model_path          → LLaMA model.ckpt（微调权重）
+#   Qwen vision_preprocess.fps     → LLaMA vision_preprocess.fps（含义一致）
+#   Qwen vision_preprocess.max_pixels → LLaMA vision_preprocess.max_frames（帧数限制）
+#   Qwen feature_saving.output_dir → LLaMA feature_saving.output_dir（相同格式）
+#   Qwen resume/logging            → LLaMA resume/logging（完全一致）
+#
+# 参考源：
+#   - Emotion-LLaMA-main/train_configs/Emotion-LLaMA_finetune.yaml（模型配置）
+#   - Emotion-LLaMA-main/minigpt4/models/base_model.py（init_vision_encoder）
+#   - Emotion-LLaMA-main/minigpt4/processors/blip_processors.py（归一化参数）
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 模型配置
+# ---------------------------------------------------------------------------
+model:
+  # Emotion-LLaMA 微调 checkpoint 路径（minigptv2_checkpoint.pth 或类似文件）
+  # 用于加载 ln_vision 和 llama_proj 的微调权重。
+  # 来源：train_configs/Emotion-LLaMA_finetune.yaml ckpt 字段
+  # HuggingFace 下载：https://huggingface.co/spaces/ZebangCheng/Emotion-LLaMA/tree/main
+  ckpt: "/root/autodl-tmp/checkpoints/minigptv2_checkpoint.pth"
+
+  # 计算设备：支持 "cuda:0" 或 "cpu"
+  device: "cuda:0"
+
+  # 模型数据类型。float16 与训练时的 vit_precision="fp16" 一致
+  # 可选 "float16", "bfloat16", "float32"
+  torch_dtype: "float16"
+
+  # 是否应用 llama_proj 线性投影层。
+  # True  → 输出 [256, 4096]（LLM 嵌入空间，与 Emotion-LLaMA 训练对齐）
+  # False → 输出 [1024, 1408]（EVA-CLIP 原始 patch tokens，更通用）
+  # 推荐 True，与 Emotion-LLaMA 的视觉特征空间一致。
+  use_llama_proj: true
+
+  # EVA-CLIP 权重加载说明：
+  #   create_eva_vit_g() 会自动从以下 URL 下载并缓存 eva_vit_g.pth：
+  #   https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP2/eva_vit_g.pth
+  #   也可预先下载到本地后通过设置 TORCH_HOME 环境变量指定缓存目录。
+
+# ---------------------------------------------------------------------------
+# 视觉预处理参数
+# ---------------------------------------------------------------------------
+vision_preprocess:
+  # 图像大小（来源：train_configs/Emotion-LLaMA_finetune.yaml image_size: 448）
+  image_size: 448
+
+  # 视频每秒采样帧数。
+  # EVA-CLIP 是图像模型（非视频模型），1fps 对大多数视频（3-10s）已足够。
+  # 提高 fps 可获取更多时序信息，但会增加显存使用和处理时间。
+  fps: 1.0
+
+  # 每个视频最多采样的帧数（防止超长视频占用过多显存）
+  max_frames: 16
+
+  # BLIP2/CLIP 标准归一化参数（来源：blip_processors.py 第 21-24 行）
+  # 注：这些参数已在脚本中硬编码，此处仅作文档记录
+  image_mean: [0.48145466, 0.4578275, 0.40821073]
+  image_std: [0.26862954, 0.26130258, 0.27577711]
+
+# ---------------------------------------------------------------------------
+# 数据配置
+# ---------------------------------------------------------------------------
+data:
+  # 数据集根目录（视频文件目录）
+  # 示例：
+  #   CA-MER:          /root/autodl-tmp/datasets/CA-MER
+  #   EMER/MER2025:    /root/autodl-tmp/datasets/MER2025-ovmer
+  dataset_path: "/root/autodl-tmp/datasets/CA-MER"
+
+  # 标注 JSON 文件名（相对于 dataset_path）
+  # 若为 null 则直接扫描 video_dir 目录
+  annotation_file: "video-aligned.json"
+
+  # 视频文件相对路径（相对于 dataset_path）
+  video_dir: "video-aligned"
+
+  # 支持的视频文件后缀
+  supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+# ---------------------------------------------------------------------------
+# 特征保存配置
+# ---------------------------------------------------------------------------
+feature_saving:
+  # 保存模式（与 Qwen 版完全一致）
+  mode: "single"
+
+  # 特征输出根目录。
+  # 实际输出路径：{output_dir}/{dataset_name}/single_files/{video_id}_fps{fps}_features.pt
+  # 示例：/root/autodl-tmp/features/EmotionLlamaEncoder/CA-MER/single_files/sample_00000001_fps1_features.pt
+  output_dir: "/root/autodl-tmp/features/EmotionLlamaEncoder"
+
+# ---------------------------------------------------------------------------
+# 断点续传配置（与 Qwen 版完全一致）
+# ---------------------------------------------------------------------------
+resume:
+  # 是否启用断点续传（自动跳过已成功提取的视频）
+  enabled: true
+
+  # 断点记录文件路径（记录已处理视频的 ID 列表）
+  checkpoint_file: "/root/autodl-tmp/logs/llama_feature_checkpoint.json"
+
+  # 每处理完多少个视频更新一次断点文件
+  save_interval: 50
+
+# ---------------------------------------------------------------------------
+# 日志配置（与 Qwen 版完全一致）
+# ---------------------------------------------------------------------------
+logging:
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  level: "INFO"
+
+  # 日志文件存储目录（每次运行生成时间戳命名的日志文件）
+  output_dir: "/root/autodl-tmp/logs/llama_features"
+
+  # 格式（供参考，实际在 feature_utils.setup_logger 中固定）
+  format: "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
