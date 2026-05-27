@@ -24,7 +24,8 @@ model:
   # 用于加载 ln_vision 和 llama_proj 的微调权重。
   # 来源：train_configs/Emotion-LLaMA_finetune.yaml ckpt 字段
   # HuggingFace 下载：https://huggingface.co/spaces/ZebangCheng/Emotion-LLaMA/tree/main
-  ckpt: "/root/autodl-tmp/checkpoints/minigptv2_checkpoint.pth"
+  # 注意：HuggingFace 上的文件名为 Emoation_LLaMA.pth（原文如此，"Emoation" 非笔误）
+  ckpt: "/root/autodl-tmp/checkpoints/Emoation_LLaMA.pth"
 
   # 计算设备：支持 "cuda:0" 或 "cpu"
   device: "cuda:0"
