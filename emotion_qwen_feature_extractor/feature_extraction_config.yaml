@@ -1,0 +1,180 @@
+# ===========================================================================
+# Emotion-Qwen 特征提取配置文件
+# 文件名：feature_extraction_config.yaml
+# 功能：定义特征提取的所有可配置参数
+# 所有默认值与Emotion-Qwen官方代码库保持一致
+# 参考源：官方config.json, generation_config.json, processing_emotionqwen_vl.py
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 模型配置（来源：官方预训练权重目录中的config.json）
+# ---------------------------------------------------------------------------
+model:
+  # 预训练权重路径（必须指向包含config.json的目录）
+  model_path: "/root/autodl-tmp/data/Emotion-Qwen-pretrained"
+
+  # 计算设备：支持 "cuda:0" 或 "cpu"
+  device: "cuda:0"
+
+  # 模型数据类型。可选 "bfloat16", "float16", "float32"
+  # 来源：官方README推理示例中使用了torch.bfloat16
+  torch_dtype: "bfloat16"
+
+  # 是否仅加载encoder部分（视觉编码器 + 混合压缩器HC）
+  # 始终为true，不加载LLM主干以节省显存
+  encoder_only: true
+
+  # Attn实现方式。可选 "flash_attention_2", "sdpa", "eager"
+  # 来源：官方README中的 attn_implementation="flash_attention_2"
+  attn_implementation: "sdpa"
+
+  # 是否信任远程代码（用于加载自定义模型）
+  # 来源：官方README中的 trust_remote_code=True
+  trust_remote_code: true
+
+# ---------------------------------------------------------------------------
+# 视觉预处理参数（来源：processing_emotionqwen_vl.py __init__方法）
+# ---------------------------------------------------------------------------
+vision_preprocess:
+  # 最小像素数。来源：官方processor.__init__中的min_pixels=3136
+  min_pixels: 3136
+
+  # 最大像素数。来源：官方processor.__init__中的max_pixels=1280*28*28=1003520
+  max_pixels: 602112
+
+  # 空间patch大小。来源：官方processor.__init__中的patch_size=14
+  patch_size: 14
+
+  # 时间patch大小。来源：官方processor.__init__中的temporal_patch_size=2
+  temporal_patch_size: 2
+
+  # 空间合并大小。来源：官方processor.__init__中的merge_size=2
+  merge_size: 2
+
+  # 视频帧率（fps）。用户在预处理时实际使用的帧率。
+  # 可选 2.0 / 4.0，数值越高保留越多时间细节但计算量也越大。
+  # 配套的 DEFAULT_FPS 常量在 feature_utils.py 中定义（仅作代码级后备）。
+  fps: 4.0
+
+  # 图像RGB归一化均值。来源：官方processor.__init__中的image_mean
+  image_mean: [0.48145466, 0.4578275, 0.40821073]
+
+  # 图像RGB归一化标准差。来源：官方processor.__init__中的image_std
+  image_std: [0.26862954, 0.26130258, 0.27577711]
+
+  # 人脸检测配置。来源：processing_emotionqwen_vl.py中deepface_model_extract函数
+  face_detection:
+    # 是否启用人脸检测和遮挡处理
+    enabled: true
+    # 人脸检测后端。来源：DeepFace.extract_faces(detector_backend='opencv')
+    detector_backend: "opencv"
+    # 是否进行人脸对齐。来源：DeepFace.extract_faces(align=True)
+    align: true
+    # 是否强制执行人脸检测。False则在检测不到人脸时返回空。来源：官方enforce_detection=False
+    enforce_detection: false
+
+# ---------------------------------------------------------------------------
+# 推理超参数（来源：generation_config.json）
+# 注：特征提取不需要这些参数，此处仅作为备份记录
+# ---------------------------------------------------------------------------
+inference_params:
+  # 温度。来源：generation_config.json temperature=0.1
+  temperature: 0.1
+  # Top-K采样。来源：generation_config.json top_k=1
+  top_k: 1
+  # Top-P采样。来源：generation_config.json top_p=0.001
+  top_p: 0.001
+  # 重复惩罚。来源：generation_config.json repetition_penalty=1.05
+  repetition_penalty: 1.05
+  # 最大新生成token数。来源：官方README示例max_new_tokens=1024
+  max_new_tokens: 1024
+
+# ---------------------------------------------------------------------------
+# 数据配置
+# ---------------------------------------------------------------------------
+data:
+  # 输入数据路径（视频文件目录或包含视频文件的JSON描述文件）
+  dataset_path: "/root/autodl-fs/benchmark/CA-MER"
+  
+  # 数据集描述JSON文件（如果dataset_path包含videos文件夹，则指向其元数据文件）
+  # 对于CA-MER数据集，其标注文件为video-aligned.json
+  annotation_file: "video-aligned.json"
+
+  # 视频文件相对路径（相对于dataset_path）
+  video_dir: "video-aligned"
+
+  # 支持的文件后缀列表
+  supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+# ---------------------------------------------------------------------------
+# 特征保存配置（inode优化核心）
+# ---------------------------------------------------------------------------
+feature_saving:
+  # 保存模式：单文件（每个视频一个.pt文件）
+  mode: "single"
+
+  # 特征输出根目录
+  output_dir: "/root/autodl-fs/data/EmoQwenEncoder"
+
+# ---------------------------------------------------------------------------
+# 批处理配置
+# ---------------------------------------------------------------------------
+batch_processing:
+  # 每次加载到GPU的视频批量大小（根据显存调整）
+  # 显存优化：encoder处理视频数建议1-4个
+  gpu_batch_size: 2
+
+  # DataLoader工作进程数
+  num_workers: 0
+
+  # 是否使用torch.no_grad()进行推理（始终为true以节省显存）
+  use_no_grad: true
+
+  # 显存优化：处理完成后是否立即删除中间张量并调用torch.cuda.empty_cache()
+  aggressive_memory_cleanup: true
+
+# ---------------------------------------------------------------------------
+# 断点续传配置
+# ---------------------------------------------------------------------------
+resume:
+  # 是否启用断点续传（自动跳过已成功提取的视频）
+  enabled: true
+
+  # 断点记录文件路径（记录已处理视频的列表）
+  checkpoint_file: "/root/autodl-tmp/emotion_qwen_feature_extractor/logs/checkpoint.json"
+
+  # 每处理完多少个视频更新一次断点文件
+  save_interval: 50
+
+# ---------------------------------------------------------------------------
+# 日志配置
+# ---------------------------------------------------------------------------
+logging:
+  # 日志级别：DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+
+  # 日志输出格式
+  format: "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+  # 日志文件存储目录
+  output_dir: "/root/autodl-tmp/emotion_qwen_feature_extractor/logs"
+
+  # 详细日志：每处理完一个视频记录详细耗时信息
+  verbose_per_video: true
+
+  # 采样频率：每处理完N个视频记录一次汇总统计
+  summary_interval: 100
+
+# ---------------------------------------------------------------------------
+# 一致性验证配置
+# ---------------------------------------------------------------------------
+consistency_verification:
+  # 是否在提取后验证特征一致性（与实时计算的输出对比）
+  enabled: true
+
+  # 验证的样本数（随机抽样）
+  num_samples: 10
+
+  # 允许的数值误差阈值（float32精度下通常设为1e-5）
+  tolerance: 1.0e-5
