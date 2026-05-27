@@ -152,6 +152,19 @@ _eva_vit_mod      = _load_module_from_file(
 )
 _create_eva_vit_g = _eva_vit_mod.create_eva_vit_g
 
+# -- 步骤4：为 dist_utils.download_cached_file 开启下载进度条 -----------------
+# 原始函数签名为 download_cached_file(url, check_hash=True, progress=False)。
+# progress=False 导致 ~3.6GB 的 eva_vit_g.pth 首次下载时没有任何输出，
+# 终端看起来像死机。此处替换为默认 progress=True 的版本。
+_dist_utils_mod = sys.modules["minigpt4.common.dist_utils"]
+_orig_download  = _dist_utils_mod.download_cached_file
+
+def _download_with_progress(url, check_hash=True, progress=True):
+    """同 dist_utils.download_cached_file，但默认开启 tqdm 进度条。"""
+    return _orig_download(url, check_hash=check_hash, progress=progress)
+
+_dist_utils_mod.download_cached_file = _download_with_progress
+
 
 # ============================================================================
 # fp16 兼容 LayerNorm（原始来源：base_model.LayerNorm，内联定义，零新依赖）
