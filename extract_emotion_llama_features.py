@@ -754,14 +754,54 @@ def main(
 
     # ====================== 获取视频列表 ======================
     logger.info(f"正在扫描视频列表... 数据集路径: {data_cfg['dataset_path']}")
+
+    # --- 诊断：先查看 annotation 文件里的字段名 ---
+    ann_path = os.path.join(data_cfg["dataset_path"], data_cfg.get("annotation_file", ""))
+    if data_cfg.get("annotation_file") and os.path.exists(ann_path):
+        try:
+            with open(ann_path, "r", encoding="utf-8") as _f:
+                _ann = json.load(_f)
+            _sample = (_ann[0] if isinstance(_ann, list) else
+                       next(iter(_ann.values())) if isinstance(_ann, dict) else None)
+            if isinstance(_sample, dict):
+                logger.info(f"  标注文件字段名: {list(_sample.keys())[:10]}")
+                # 检查哪个字段存有视频文件名
+                _vid_field = None
+                for _k in ("video", "file", "path", "video_path", "video_file",
+                           "filename", "name", "clip_id", "clip"):
+                    if _k in _sample:
+                        _vid_field = _k
+                        logger.info(f"  视频字段: '{_k}' → 示例值: {_sample[_k]}")
+                        break
+                if _vid_field is None:
+                    logger.warning(f"  ⚠ 未找到视频字段，将回退到目录扫描。请检查 JSON 字段名并更新 feature_utils.get_video_list")
+        except Exception as _e:
+            logger.warning(f"  ⚠ 读取标注文件失败: {_e}")
+    else:
+        logger.warning(f"  ⚠ 标注文件不存在: {ann_path}，将直接扫描目录")
+
     video_list = get_video_list(
         dataset_path=data_cfg["dataset_path"],
         annotation_file=data_cfg.get("annotation_file"),
         video_dir=data_cfg.get("video_dir", "video"),
         extensions=data_cfg.get("supported_extensions"),
     )
+
+    # --- 过滤 macOS AppleDouble 隐藏元数据文件（._filename 格式）---
+    # 这类文件由 macOS 在复制时自动创建，扩展名可为 .mp4/.mov 等，
+    # 但内容是元数据而非视频，OpenCV 无法打开（moov atom not found）。
+    _before = len(video_list)
+    video_list = [
+        v for v in video_list
+        if not os.path.basename(v.get("video_file", "")).startswith("._")
+    ]
+    _mac_filtered = _before - len(video_list)
+    if _mac_filtered > 0:
+        logger.info(f"  已过滤 {_mac_filtered} 个 macOS 隐藏元数据文件（'._' 前缀）")
+
     total_count = len(video_list)
     logger.info(f"✅ 找到 {total_count} 个视频文件")
+
 
     if total_count == 0:
         logger.error("未找到任何视频文件，退出")
