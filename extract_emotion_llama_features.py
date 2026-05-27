@@ -92,6 +92,32 @@ for _stub_dir in [
         with open(_stub_init, "w") as _f:
             _f.write("# Auto-generated stub: datasets package not needed for feature extraction\n")
 
+# ---------------------------------------------------------------------------
+# peft 版本兼容性修复
+# ---------------------------------------------------------------------------
+# peft >= 0.7.0 移除了 `prepare_model_for_int8_training`（已改名为
+# `prepare_model_for_kbit_training`）。minigpt4/models/base_model.py 在其
+# 模块级 import 语句中引用了该旧 API，但特征提取时并不实际调用。
+#
+# 解决思路：在任何 minigpt4 模块被导入之前，将缺失的属性注入到已加载的
+# `peft` 模块对象中。Python 的 `from peft import X` 本质上是 `peft.X`，
+# 因此预注入后 base_model.py 的 import 语句可以正常完成。
+try:
+    import peft as _peft_compat
+    if not hasattr(_peft_compat, "prepare_model_for_int8_training"):
+        if hasattr(_peft_compat, "prepare_model_for_kbit_training"):
+            # peft >= 0.4.0 的等价替换函数
+            _peft_compat.prepare_model_for_int8_training = (
+                _peft_compat.prepare_model_for_kbit_training
+            )
+        else:
+            # 终极回退：返回原模型（特征提取时从不调用此函数）
+            _peft_compat.prepare_model_for_int8_training = lambda model, **kwargs: model
+    del _peft_compat
+except ImportError:
+    # peft 未安装时跳过（后续 timm/torch 环境可能不需要 peft）
+    pass
+
 # 导入 feature_utils（Qwen 提取器工具函数，格式完全复用）
 _UTILS_DIR = os.path.join(_SCRIPT_DIR, "emotion_qwen_feature_extractor")
 if _UTILS_DIR not in sys.path:
