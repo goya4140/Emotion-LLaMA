@@ -79,6 +79,19 @@ _EMOTION_LLAMA_DIR = os.path.join(_SCRIPT_DIR, "Emotion-LLaMA-main")
 if _EMOTION_LLAMA_DIR not in sys.path:
     sys.path.insert(0, _EMOTION_LLAMA_DIR)
 
+# minigpt4/__init__.py 执行 `from minigpt4.datasets.builders import *`，
+# 但官方仓库未包含 datasets/ 目录（数据集代码需单独获取）。
+# 在此自动创建空占位符包，解除导入阻塞。本脚本不使用任何数据集功能。
+for _stub_dir in [
+    os.path.join(_EMOTION_LLAMA_DIR, "minigpt4", "datasets"),
+    os.path.join(_EMOTION_LLAMA_DIR, "minigpt4", "datasets", "builders"),
+]:
+    os.makedirs(_stub_dir, exist_ok=True)
+    _stub_init = os.path.join(_stub_dir, "__init__.py")
+    if not os.path.exists(_stub_init):
+        with open(_stub_init, "w") as _f:
+            _f.write("# Auto-generated stub: datasets package not needed for feature extraction\n")
+
 # 导入 feature_utils（Qwen 提取器工具函数，格式完全复用）
 _UTILS_DIR = os.path.join(_SCRIPT_DIR, "emotion_qwen_feature_extractor")
 if _UTILS_DIR not in sys.path:
