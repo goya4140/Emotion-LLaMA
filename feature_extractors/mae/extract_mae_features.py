@@ -4,11 +4,11 @@
 功能：MAE（Masked Autoencoder，ViT-Large）视觉特征提取脚本
 
 数据流：
-  代表帧 [1, 3, 224, 224]
+  均匀采样 N 帧（默认 8 帧）[N, 3, 224, 224]
     → ViTMAEModel (facebook/vit-mae-large, mask_ratio=0)
-    → last_hidden_state [1, 197, 1024]  (CLS + 196 patch tokens)
-    → 取 patch tokens [:, 1:, :]        [1, 196, 1024]
-    → 空间均值                          [1024]  ← 保存此输出
+    → last_hidden_state [N, 197, 1024]  (CLS + 196 patch tokens)
+    → 取 patch tokens [:, 1:, :]        [N, 196, 1024]
+    → 时空均值 mean(dim=(0,1))          [1024]  ← 保存此输出
 
 输出格式：每视频一个 .pt 文件，features.shape = [1024]
 对应模型层：Emotion-LLaMA 中 feats_llama_proj1 的输入
@@ -73,8 +73,8 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD  = (0.229, 0.224, 0.225)
 
 DEFAULT_IMAGE_SIZE = 224    # MAE ViT-L/16 标准输入尺寸
-DEFAULT_FPS        = 1.0    # 取代表帧
-DEFAULT_MAX_FRAMES = 1      # MAE 是图像模型，取 1 帧即可
+DEFAULT_FPS        = 1.0    # 均匀采帧
+DEFAULT_MAX_FRAMES = 8      # 默认 8 帧，逐帧提取后做时间均值
 MIN_FPS            = 0.25
 
 MAE_MODEL_NAME = "facebook/vit-mae-large"

@@ -10,8 +10,8 @@ model:
   device: "cuda:0"
 
 vision_preprocess:
-  fps: 1.0                # MAE 是图像模型，取代表帧
-  max_frames: 1           # 每个视频仅取一帧（时间均值退化为单帧）
+  fps: 1.0                # MAE 是图像模型，逐帧处理后做时间均值
+  max_frames: 8           # 每个视频均匀采 8 帧，对帧取均值后得到 [1024]
   image_size: 224         # ViT-MAE-Large 输入尺寸
 
 datasets:
