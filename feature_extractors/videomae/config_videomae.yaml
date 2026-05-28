@@ -1,0 +1,40 @@
+# ===========================================================================
+# VideoMAE 时空特征提取配置文件
+# 输出格式：[1024]  （spatio-temporal token 均值）
+# ===========================================================================
+
+model:
+  model_name: "MCG-NJU/videomae-large"
+  image_size: 224
+  precision: "float16"
+  device: "cuda:0"
+
+vision_preprocess:
+  num_frames: 16          # VideoMAE-Large 标准输入：16 帧
+  image_size: 224         # ViT-Large patch_size=16 → 14×14 spatial tokens
+
+datasets:
+  - name: "CA-MER"
+    dataset_path: "/root/autodl-tmp/datasets/CA-MER"
+    annotation_file: "video-aligned.json"
+    video_dir: "video-aligned"
+    supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+  - name: "EMER"
+    dataset_path: "/home/user/Emotion-LLaMA"
+    annotation_file: "emotion_analysis_data.json"
+    video_dir: "video"    # 绝对路径优先，此字段仅作回退用
+    supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+feature_saving:
+  output_root: "/root/autodl-fs/features"
+  # 最终路径: {output_root}/VideoMAE/{dataset_name}/{video_id}_features.pt
+
+resume:
+  enabled: true
+  checkpoint_file: "/root/autodl-tmp/logs/videomae_{dataset}_checkpoint.json"
+  save_interval: 50
+
+logging:
+  level: "INFO"
+  output_dir: "/root/autodl-tmp/logs"

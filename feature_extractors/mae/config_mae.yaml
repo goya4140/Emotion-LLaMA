@@ -1,0 +1,41 @@
+# ===========================================================================
+# MAE 视觉特征提取配置文件
+# 输出格式：[1024]  （patch token 空间+时间均值，不含 CLS）
+# ===========================================================================
+
+model:
+  model_name: "facebook/vit-mae-large"
+  image_size: 224
+  precision: "float16"
+  device: "cuda:0"
+
+vision_preprocess:
+  fps: 1.0                # MAE 是图像模型，取代表帧
+  max_frames: 1           # 每个视频仅取一帧（时间均值退化为单帧）
+  image_size: 224         # ViT-MAE-Large 输入尺寸
+
+datasets:
+  - name: "CA-MER"
+    dataset_path: "/root/autodl-tmp/datasets/CA-MER"
+    annotation_file: "video-aligned.json"
+    video_dir: "video-aligned"
+    supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+  - name: "EMER"
+    dataset_path: "/home/user/Emotion-LLaMA"
+    annotation_file: "emotion_analysis_data.json"
+    video_dir: "video"    # 绝对路径优先，此字段仅作回退用
+    supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
+
+feature_saving:
+  output_root: "/root/autodl-fs/features"
+  # 最终路径: {output_root}/MAE/{dataset_name}/{video_id}_features.pt
+
+resume:
+  enabled: true
+  checkpoint_file: "/root/autodl-tmp/logs/mae_{dataset}_checkpoint.json"
+  save_interval: 50
+
+logging:
+  level: "INFO"
+  output_dir: "/root/autodl-tmp/logs"
