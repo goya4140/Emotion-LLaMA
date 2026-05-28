@@ -1,69 +1,132 @@
-# Emotion-LLaMA 特征提取任务
+# Emotion-LLaMA 特征提取工具集
 
 ## 项目背景
 
-基于 Emotion-LLaMA 框架，对三个情感识别数据集提取多模态特征，为后续模型微调训练做数据准备。
+基于 Emotion-LLaMA 框架，对情感识别数据集（CA-MER、EMER）提取多模态视觉特征，为后续模型微调训练做数据准备。
 
 ---
 
-## 仓库结构预期
+## 仓库结构
 
 ```
-repo/
-├── emotion_qwen_feature_extractor/   ← 师兄提供的 Qwen 版本脚本（参考模板）
-├── extract_emotion_llama_features.py ← 待完善的 LLaMA 版本脚本
-├── feature_extraction_config.yaml   ← 配置文件
-├── Emotion-LLaMA/                   ← clone 的 Emotion-LLaMA 原始仓库
-├── datasets/
-│   ├── CA-MER/
-│   ├── EMER/  (实际目录名 MER2025-ovmer)
-│   └── 第三数据集/（待补充）
-└── annotations/
-    └── emotion_analysis_data.json   ← EMER 训练标注（332条，CoT格式）
+Emotion-LLaMA/
+├── feature_extractors/                  ← 三路视觉编码器特征提取（主要工作目录）
+│   ├── shared/
+│   │   └── feature_utils.py             ← 共享工具函数（日志、保存、视频列表）
+│   ├── eva_clip/
+│   │   ├── extract_eva_clip_features.py ← EVA-CLIP-G 提取器，输出 [1024, 1408]
+│   │   ├── config_eva_clip.yaml         ← 配置文件（含 CA-MER + EMER 双数据集）
+│   │   └── vendor/
+│   │       ├── eva_vit.py               ← EVA ViT 架构（无需安装 minigpt4 包）
+│   │       └── dist_utils.py            ← 权重下载工具
+│   ├── mae/
+│   │   ├── extract_mae_features.py      ← MAE-Large 提取器，输出 [1024]
+│   │   └── config_mae.yaml
+│   └── videomae/
+│       ├── extract_videomae_features.py ← VideoMAE-Large 提取器，输出 [1024]
+│       └── config_videomae.yaml
+│
+├── emotion_qwen_feature_extractor/      ← Qwen VL 版提取器（保持不变）
+├── extract_emotion_llama_features.py    ← 旧版 LLaMA 提取器（含 llama_proj，历史存档）
+├── emotion_analysis_data.json           ← EMER 数据集标注（332 条，CoT 对话格式）
+├── 特征提取脚本说明.md
+└── 操作指导.md
 ```
 
 ---
 
-## 核心任务
+## 三路编码器概览
 
-### 1. 对齐特征提取脚本
+| 编码器 | 脚本 | 输出形状 | 对应 Emotion-LLaMA 层 | 权重来源 |
+|--------|------|---------|----------------------|---------|
+| EVA-CLIP-G | `eva_clip/extract_eva_clip_features.py` | `[1024, 1408]` | `llama_proj` 输入边界 | `eva_vit_g.pth`（自动下载，~3.6GB） |
+| MAE-Large | `mae/extract_mae_features.py` | `[1024]` | `feats_llama_proj1` 输入边界 | `facebook/vit-mae-large`（HuggingFace） |
+| VideoMAE-Large | `videomae/extract_videomae_features.py` | `[1024]` | `feats_llama_proj2` 输入边界 | `MCG-NJU/videomae-large`（HuggingFace） |
 
-参考 `emotion_qwen_feature_extractor/` 中的逻辑，完善 `extract_emotion_llama_features.py`，使其能够提取 Emotion-LLaMA 所需的三路特征：
-
-- **FaceMAE 特征** → 存入 `mae_340_UTT/{video_name}.npy`，shape `(1, 1024)`
-- **VideoMAE 特征** → 存入 `maeV_399_UTT/{video_name}.npy`，shape `(1, 1024)`
-- **HuBERT 音频特征** → 存入 `HL-UTT/{video_name}.npy`，shape `(1, 1024)`
-
-抽帧和特征提取方式需与师兄示例代码保持一致。
-
-### 2. 修改 Emotion-LLaMA 数据加载代码
-
-修改 `Emotion-LLaMA/minigpt4/datasets/datasets/first_face.py` 中的路径配置，使其指向本地数据集和特征目录。
-
-### 3. 修改训练配置文件
-
-修改 `Emotion-LLaMA/train_configs/Emotion-LLaMA_finetune.yaml`：
-- `llama_model` 路径指向本地 LLaMA-2 权重
-- `ckpt` 路径指向本地 minigptv2_checkpoint.pth
-- `output_dir` 指向本地输出目录
-
-### 4. 数据标注格式对齐
-
-`emotion_analysis_data.json` 为 CoT 对话格式（用于 Qwen VL 微调），需确认其是否需要转换为 Emotion-LLaMA 原版的标注格式（`MERR_coarse_grained.txt`）。
+三个编码器均为**独立使用**，不加载 Emotion-LLaMA 的投影层权重（`llama_proj`、`feats_llama_proj`、`cls_tk_llama_proj`）。输出向量格式与投影层输入边界对齐，可直接传入对应线性层。
 
 ---
 
-## 关键约束
+## 快速开始
 
-- EMER 数据集视频路径必须与标注 JSON 中的硬编码路径一致：
-  `/root/autodl-tmp/datasets/MER2025-ovmer/video/`
-- 三路特征 shape 必须为 `(1, 1024)`，与 Emotion-LLaMA 线性投影层输入维度对齐
-- 如果 Emotion-LLaMA 无法运行，回退方案为使用 Qwen VL 7B/8B
+```bash
+# 安装依赖
+pip install timm omegaconf opencv-python-headless Pillow pyyaml transformers -q
+
+# EVA-CLIP 特征提取（CA-MER + EMER）
+python feature_extractors/eva_clip/extract_eva_clip_features.py \
+    --config feature_extractors/eva_clip/config_eva_clip.yaml
+
+# MAE 特征提取
+python feature_extractors/mae/extract_mae_features.py \
+    --config feature_extractors/mae/config_mae.yaml
+
+# VideoMAE 特征提取
+python feature_extractors/videomae/extract_videomae_features.py \
+    --config feature_extractors/videomae/config_videomae.yaml
+```
+
+输出路径：`/root/autodl-fs/features/{EVA-CLIP,MAE,VideoMAE}/{CA-MER,EMER}/{video_id}_features.pt`
 
 ---
 
-## 待确认项（需联系师兄）
+## 输出文件格式
 
-- [ ] CA-MER 数据集的标注 JSON 在哪里
-- [ ] 第三个数据集（吴思雨处）
-- [ ] 抽帧方式的具体参数（师兄承诺发示例代码）
+每个视频对应一个 `.pt` 文件（Python dict）：
+
+```python
+{
+    "features":      torch.Tensor,   # 形状见上表，dtype=float32（CPU）
+    "feature_shape": list,
+    "metadata": {
+        "video_id":      str,
+        "video_file":    str,
+        "label":         str,        # 情感标签（从标注 JSON 解析）
+        "encoder_type":  str,        # "EVA-CLIP-G" / "MAE-Large" / "VideoMAE-Large"
+        ...
+    },
+    "timestamp": str,
+}
+```
+
+加载示例：
+```python
+import torch
+data = torch.load("sample_00000001_features.pt", map_location="cpu", weights_only=False)
+features = data["features"]   # e.g. torch.Tensor [1024, 1408]
+label    = data["metadata"]["label"]
+```
+
+---
+
+## 数据集说明
+
+| 数据集 | 标注文件 | 视频目录 | 格式 |
+|-------|---------|---------|------|
+| CA-MER | `video-aligned.json` | `video-aligned/` | 列表 JSON，`video` 字段为相对路径 |
+| EMER | `emotion_analysis_data.json`（仓库根目录） | 绝对路径（`/root/autodl-tmp/.../video/`） | CoT 对话格式，标签在 `<answer>` 标签内 |
+
+---
+
+## 断点续传
+
+所有提取器均支持断点续传。中断后直接重新运行即可，已完成的视频会自动跳过（基于 checkpoint JSON + 输出文件存在检查双重保险）。
+
+```bash
+# 只处理单个数据集（--dataset 参数）
+python feature_extractors/eva_clip/extract_eva_clip_features.py \
+    --config feature_extractors/eva_clip/config_eva_clip.yaml \
+    --dataset CA-MER
+
+# 试运行（不实际提取，只打印路径）
+python feature_extractors/eva_clip/extract_eva_clip_features.py \
+    --config feature_extractors/eva_clip/config_eva_clip.yaml \
+    --dry-run
+```
+
+---
+
+## 详细说明
+
+- 脚本原理与架构：[`特征提取脚本说明.md`](./特征提取脚本说明.md)
+- AutoDL 完整操作步骤：[`操作指导.md`](./操作指导.md)
