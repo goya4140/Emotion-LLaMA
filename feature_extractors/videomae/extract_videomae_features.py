@@ -398,6 +398,13 @@ def main():
     precision    = model_cfg.get("precision", "float16")
     torch_dtype  = torch.float16 if precision in ("fp16", "float16") else torch.float32
 
+    # HuggingFace 镜像（优先使用配置文件，其次读取环境变量）
+    # AutoDL 推荐镜像：https://hf-mirror.com
+    hf_endpoint = model_cfg.get("hf_endpoint", "") or os.environ.get("HF_ENDPOINT", "")
+    if hf_endpoint:
+        os.environ["HF_ENDPOINT"] = hf_endpoint
+        logger.info(f"HuggingFace 镜像: {hf_endpoint}")
+
     preproc_cfg  = cfg.get("vision_preprocess", {})
     num_frames   = int(preproc_cfg.get("num_frames", DEFAULT_NUM_FRAMES))
 

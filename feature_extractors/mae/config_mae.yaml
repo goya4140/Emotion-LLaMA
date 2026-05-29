@@ -8,6 +8,8 @@ model:
   image_size: 224
   precision: "float16"
   device: "cuda:0"
+  # AutoDL / 受限网络环境下使用 HuggingFace 镜像
+  hf_endpoint: "https://hf-mirror.com"
 
 vision_preprocess:
   fps: 1.0                # MAE 是图像模型，逐帧处理后做时间均值

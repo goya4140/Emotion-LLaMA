@@ -8,6 +8,9 @@ model:
   image_size: 224
   precision: "float16"
   device: "cuda:0"
+  # AutoDL / 受限网络环境下使用 HuggingFace 镜像，避免 XetHub 401 和代理超时
+  # 若已在环境变量中设置 HF_ENDPOINT，可删除此行
+  hf_endpoint: "https://hf-mirror.com"
 
 vision_preprocess:
   num_frames: 16          # VideoMAE-Large 标准输入：16 帧

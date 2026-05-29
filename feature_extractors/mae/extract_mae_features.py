@@ -414,6 +414,12 @@ def main(config_path: str, dataset_name_filter: Optional[str] = None) -> None:
     used, total, pct = check_inode_usage()
     logger.info(f"inode: {used}/{total} ({pct:.1f}%)，剩余 {get_available_inodes()}")
 
+    # HuggingFace 镜像（优先使用配置文件，其次读取环境变量）
+    hf_endpoint = model_cfg.get("hf_endpoint", "") or os.environ.get("HF_ENDPOINT", "")
+    if hf_endpoint:
+        os.environ["HF_ENDPOINT"] = hf_endpoint
+        logger.info(f"HuggingFace 镜像: {hf_endpoint}")
+
     dtype_map = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
     torch_dtype = dtype_map.get(model_cfg.get("precision", "float16"), torch.float16)
 
