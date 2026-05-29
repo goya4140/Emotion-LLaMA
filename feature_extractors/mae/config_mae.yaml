@@ -24,9 +24,9 @@ datasets:
     supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
 
   - name: "EMER"
-    dataset_path: "/home/user/Emotion-LLaMA"
-    annotation_file: "emotion_analysis_data.json"
-    video_dir: "video"    # 绝对路径优先，此字段仅作回退用
+    dataset_path: "/root/autodl-tmp/datasets/EMER"
+    annotation_file: "track2_train_ovmerd.csv"
+    video_dir: "."
     supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
 
 feature_saving:

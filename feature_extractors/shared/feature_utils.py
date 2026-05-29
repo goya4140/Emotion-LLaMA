@@ -208,17 +208,74 @@ def _extract_label_from_conversations(conversations: list) -> Optional[str]:
     return None
 
 
+def _read_csv_annotations(csv_path: str) -> Dict[str, str]:
+    """
+    读取 CSV 标注文件，返回 {video_stem: label} 映射。
+
+    支持 MER2025 OVMER 格式（track2_train_ovmerd.csv / track3_train_ovmerd.csv）。
+    自动检测分隔符（逗号/分号/制表符），自动识别视频名列和标签列。
+
+    Returns:
+        {视频文件名（无扩展名）: 情感标签} 的字典
+    """
+    import csv
+
+    annotations: Dict[str, str] = {}
+    with open(csv_path, "r", encoding="utf-8") as f:
+        raw = f.read(8192)
+        f.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(raw, delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel  # 默认逗号
+
+        reader = csv.DictReader(f, dialect=dialect)
+        if reader.fieldnames is None:
+            return annotations
+
+        # 识别视频名列（优先顺序）
+        id_candidates   = ["sample_id", "video_name", "video", "file_name",
+                            "filename", "name", "id", "clip_id"]
+        # 识别标签列
+        label_candidates = ["discrete_label", "label", "emotion", "class",
+                             "category", "sentiment", "emotion_label"]
+
+        fields_lower = {f.strip().lower(): f for f in reader.fieldnames if f}
+        id_col    = next((fields_lower[c] for c in id_candidates    if c in fields_lower), None)
+        label_col = next((fields_lower[c] for c in label_candidates if c in fields_lower), None)
+
+        # 最后兜底：第一列为 ID，最后一列为 label
+        all_fields = [f.strip() for f in reader.fieldnames if f.strip()]
+        if id_col    is None and all_fields:
+            id_col    = all_fields[0]
+        if label_col is None and len(all_fields) >= 2:
+            label_col = all_fields[-1]
+
+        for row in reader:
+            if id_col is None:
+                break
+            vid_name = str(row.get(id_col, "")).strip()
+            label    = str(row.get(label_col, "unknown")).strip() if label_col else "unknown"
+            if vid_name:
+                # 去掉可能带的扩展名，统一用 stem 作为 key
+                stem = os.path.splitext(vid_name)[0]
+                annotations[stem]    = label
+                annotations[vid_name] = label  # 同时保留带扩展名的版本
+
+    return annotations
+
+
 def get_video_list(dataset_path: str, annotation_file: Optional[str] = None,
                    video_dir: str = "video-aligned",
                    extensions: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     获取待处理的视频列表和对应的标签信息。
-    支持JSON标注文件和直接扫描目录两种方式。
+    支持 JSON（含 EMER conversations 格式）、CSV 标注文件和直接扫描目录三种方式。
 
     Args:
         dataset_path: 数据集根目录
-        annotation_file: 标注JSON文件名（可选）
-        video_dir: 视频文件夹相对路径
+        annotation_file: 标注文件名（.json 或 .csv，可选）
+        video_dir: 视频文件夹相对路径；"." 表示视频直接在 dataset_path 下
         extensions: 支持的文件后缀列表
 
     Returns:
@@ -226,16 +283,40 @@ def get_video_list(dataset_path: str, annotation_file: Optional[str] = None,
     """
     if extensions is None:
         extensions = [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
-    
+
     video_list = []
-    
-    # 优先使用JSON标注文件
-    if annotation_file and os.path.exists(os.path.join(dataset_path, annotation_file)):
-        ann_path = os.path.join(dataset_path, annotation_file)
+
+    # ------------------------------------------------------------------
+    # 1. CSV 标注文件（MER2025 OVMER 等挑战赛格式）
+    # ------------------------------------------------------------------
+    ann_path = os.path.join(dataset_path, annotation_file) if annotation_file else None
+    if ann_path and annotation_file and annotation_file.lower().endswith(".csv") and os.path.exists(ann_path):
+        csv_labels = _read_csv_annotations(ann_path)
+
+        # 扫描视频目录，用 CSV 提供标签
+        vdir = os.path.join(dataset_path, video_dir) if video_dir not in ("", ".") else dataset_path
+        if os.path.isdir(vdir):
+            for fname in sorted(os.listdir(vdir)):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in extensions:
+                    continue
+                stem  = os.path.splitext(fname)[0]
+                label = csv_labels.get(stem) or csv_labels.get(fname) or "unknown"
+                video_list.append({
+                    "video_path": os.path.join(vdir, fname),
+                    "label":      label,
+                    "id":         stem,
+                    "video_file": fname,
+                })
+
+    # ------------------------------------------------------------------
+    # 2. JSON 标注文件（含 EMER conversations 格式）
+    # ------------------------------------------------------------------
+    elif ann_path and annotation_file and not annotation_file.lower().endswith(".csv") \
+            and os.path.exists(ann_path):
         with open(ann_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        
-        # 处理不同格式的JSON（来自官方数据集可能有不同结构）
+
         if isinstance(data, list):
             entries = data
         elif isinstance(data, dict) and "data" in data:
@@ -244,45 +325,62 @@ def get_video_list(dataset_path: str, annotation_file: Optional[str] = None,
             entries = data["samples"]
         else:
             entries = []
-            # 尝试遍历字典值
             for key, val in data.items():
                 if isinstance(val, dict) and ("video" in val or "file" in val):
                     entries.append(val)
-        
+
         for i, entry in enumerate(entries):
-            # 尝试多种可能的字段名获取视频路径和标签
-            video_file = entry.get("video") or entry.get("file") or entry.get("path") or entry.get("video_path")
-            label = entry.get("label") or entry.get("emotion") or entry.get("class") or entry.get("category")
-            # EMER conversations 格式：从 <answer> 标签提取情感标签
+            video_file = (entry.get("video") or entry.get("file")
+                          or entry.get("path") or entry.get("video_path"))
+            label      = (entry.get("label") or entry.get("emotion")
+                          or entry.get("class") or entry.get("category"))
             if label is None and "conversations" in entry:
                 label = _extract_label_from_conversations(entry["conversations"])
             sample_id = entry.get("id") or entry.get("sample_id") or str(i)
-            
-            if video_file:
-                # 构建完整路径
-                full_path = os.path.join(dataset_path, video_dir, video_file) if not os.path.isabs(video_file) else video_file
-                if os.path.exists(full_path):
-                    video_list.append({
-                        "video_path": full_path,
-                        "label": str(label) if label is not None else "unknown",
-                        "id": str(sample_id),
-                        "video_file": video_file
-                    })
-    
-    # 如果没有标注文件或解析失败，直接扫描目录
+
+            if not video_file:
+                continue
+
+            # 构建完整路径
+            if os.path.isabs(video_file):
+                full_path = video_file
+            else:
+                full_path = os.path.join(dataset_path, video_dir, video_file)
+
+            # 路径回退：JSON 中的绝对路径失效时，按文件名在 video_dir 中查找
+            if not os.path.exists(full_path) and os.path.isabs(video_file):
+                basename = os.path.basename(video_file)
+                vdir_root = os.path.join(dataset_path, video_dir) \
+                    if video_dir not in ("", ".") else dataset_path
+                alt_path = os.path.join(vdir_root, basename)
+                if os.path.exists(alt_path):
+                    full_path = alt_path
+
+            if os.path.exists(full_path):
+                video_list.append({
+                    "video_path": full_path,
+                    "label":      str(label) if label is not None else "unknown",
+                    "id":         str(sample_id),
+                    "video_file": video_file,
+                })
+
+    # ------------------------------------------------------------------
+    # 3. 无标注文件时直接扫描目录（label 设为 unknown）
+    # ------------------------------------------------------------------
     if len(video_list) == 0:
-        vdir = os.path.join(dataset_path, video_dir)
+        vdir = os.path.join(dataset_path, video_dir) \
+            if video_dir not in ("", ".") else dataset_path
         if os.path.isdir(vdir):
             for fname in sorted(os.listdir(vdir)):
                 ext = os.path.splitext(fname)[1].lower()
                 if ext in extensions:
                     video_list.append({
                         "video_path": os.path.join(vdir, fname),
-                        "label": "unknown",
-                        "id": os.path.splitext(fname)[0],
-                        "video_file": fname
+                        "label":      "unknown",
+                        "id":         os.path.splitext(fname)[0],
+                        "video_file": fname,
                     })
-    
+
     return video_list
 
 

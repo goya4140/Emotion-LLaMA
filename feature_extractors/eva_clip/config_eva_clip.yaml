@@ -21,10 +21,10 @@ datasets:
     supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
 
   - name: "EMER"
-    # emotion_analysis_data.json 在仓库根目录，视频路径为绝对路径
-    dataset_path: "/home/user/Emotion-LLaMA"
-    annotation_file: "emotion_analysis_data.json"
-    video_dir: "video"    # 绝对路径优先，此字段仅作回退用
+    # 视频文件直接在 EMER/ 根目录下（无 video/ 子目录）
+    dataset_path: "/root/autodl-tmp/datasets/EMER"
+    annotation_file: "track2_train_ovmerd.csv"   # CSV 标注，含情感标签
+    video_dir: "."         # 视频就在 dataset_path 下，无子目录
     supported_extensions: [".avi", ".mp4", ".mov", ".mkv", ".webm", ".flv"]
 
 feature_saving:
